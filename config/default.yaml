@@ -1,0 +1,256 @@
+# =============================================================================
+# RAG Comparison System -- Default Configuration
+# =============================================================================
+# All tunable parameters. CLI overrides take precedence over this file.
+# Precedence: CLI argument > this YAML > Pydantic model defaults
+#
+# CLI override dot-notation examples:
+#   --chunk-size 400        -> chunking.chunk_size
+#   --provider openai       -> llm.provider
+#   --model gpt-4o          -> models.llm_model
+#   --top-k 15              -> retrieval.top_k_dense
+#   --max-workers 8         -> concurrency.max_workers
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# paths -- filesystem locations for all persistent artifacts
+# -----------------------------------------------------------------------------
+paths:
+  # Root data directory. All other paths below are relative to project root.
+  data_dir: "data"
+
+  # ChromaDB persistent storage directory.
+  # Contains two collections: rag_traditional_v1 and rag_contextualized_v1.
+  chroma_dir: "data/chroma_db"
+
+  # Contextualization cache: one JSON file per chunk_id.
+  # Enables crash recovery -- completed chunks are skipped on restart.
+  cache_dir: "data/cache"
+
+  # Evaluation results: one JSON file per question-pipeline-metric combination.
+  # Pattern: {question_id}_{pipeline}_{metric}.json
+  # Also stores telemetry.json after each CLI run.
+  results_dir: "data/results"
+
+  # Downloaded arXiv PDF files (20 papers).
+  papers_dir: "data/papers"
+
+
+# -----------------------------------------------------------------------------
+# models -- ML model identifiers
+# -----------------------------------------------------------------------------
+models:
+  # Local embedding model loaded via sentence-transformers on MPS.
+  # Max sequence length: 512 tokens. Embedding dimension: 768.
+  # Memory footprint: ~416MB on MPS.
+  embedding_model: "BAAI/bge-base-en-v1.5"
+
+  # Cross-encoder reranker loaded via sentence-transformers on MPS.
+  # Used only by the Modern pipeline (dense + BM25 + RRF + rerank).
+  # Memory footprint: ~1.1GB on MPS. Never loaded simultaneously with embedder.
+  reranker_model: "BAAI/bge-reranker-v2-m3"
+
+  # LLM used for answer generation across all 4 pipelines.
+  # Overridable via --model CLI flag.
+  llm_model: "claude-sonnet-4-20250514"
+
+  # LLM used as judge for evaluation scoring (4 metrics x 20 questions x 4 pipelines = 320 calls).
+  # Separate from llm_model to allow cheaper model for judging.
+  judge_model: "claude-haiku-4-5-20241022"
+
+
+# -----------------------------------------------------------------------------
+# chunking -- document splitting parameters
+# NOTE: chunk_size must not exceed 512 tokens (bge-base-en-v1.5 max sequence).
+# Final values to be confirmed in Phase 1 after chunk-sizing research.
+# -----------------------------------------------------------------------------
+chunking:
+  # Target chunk size in tokens. Reasonable default; finalized in Phase 1.
+  # Smaller chunks = more precise retrieval but less context per chunk.
+  # Larger chunks = more context but may dilute relevance signals.
+  chunk_size: 450
+
+  # Overlap between consecutive chunks in tokens.
+  # Prevents information loss at chunk boundaries.
+  chunk_overlap: 68
+
+
+# -----------------------------------------------------------------------------
+# retrieval -- top-k and fusion parameters for the retrieval pipeline
+# -----------------------------------------------------------------------------
+retrieval:
+  # Number of chunks returned by dense (vector similarity) search.
+  # Used by Traditional, Contextual, Hybrid, and Modern pipelines.
+  top_k_dense: 20
+
+  # Number of chunks returned by BM25 sparse retrieval.
+  # Used by Hybrid and Modern pipelines only.
+  top_k_bm25: 20
+
+  # Number of chunks kept after Reciprocal Rank Fusion merges dense + BM25 results.
+  # Used by Hybrid and Modern pipelines only.
+  top_k_fusion: 20
+
+  # Number of chunks kept after cross-encoder reranking.
+  # Used by Modern pipeline only. Final set passed to LLM for answer generation.
+  top_k_rerank: 10
+
+  # RRF constant k. Controls the diminishing-returns curve for rank positions.
+  # Score for document d in list = 1 / (k + rank(d)). Standard default is 60.
+  # Higher k = less penalty for low ranks; lower k = more aggressive top-rank boosting.
+  rrf_k: 60
+
+
+# -----------------------------------------------------------------------------
+# llm -- LLM provider and generation parameters
+# -----------------------------------------------------------------------------
+llm:
+  # Active LLM provider. Options: "anthropic" | "openai" | "claude_cli"
+  # - anthropic: uses Anthropic SDK, reads ANTHROPIC_API_KEY from env
+  # - openai: uses OpenAI SDK, reads OPENAI_API_KEY from env
+  # - claude_cli: shells out to `claude` CLI, token counts are estimated (chars/4)
+  provider: "claude_cli"
+
+  # Environment variable name holding the Anthropic API key.
+  # The value of this env var is read at runtime (not stored here).
+  anthropic_api_key_env: "ANTHROPIC_API_KEY"
+
+  # Environment variable name holding the OpenAI API key.
+  # The value of this env var is read at runtime (not stored here).
+  openai_api_key_env: "OPENAI_API_KEY"
+
+  # Sampling temperature for answer generation. 0.0 = deterministic/greedy.
+  # Keep at 0.0 for reproducible, factual RAG answers.
+  temperature: 0.0
+
+  # Maximum tokens in the generated answer. Applies to all pipelines.
+  max_tokens: 2048
+
+
+# -----------------------------------------------------------------------------
+# cost_estimation -- static token-count defaults for Phase A (pre-run) estimates
+# and sample sizes for Phase B (sample-based) refinement.
+#
+# Phase A: rough estimate displayed before every run (accuracy ±50%).
+# Phase B: run on small sample first, measure actual tokens, extrapolate.
+#
+# Formulas (from Section 9.4):
+#   contextualize input  = num_chunks × (avg_doc_tokens + avg_chunk_tokens)
+#   contextualize output = num_chunks × contextualization_output_tokens
+#   generate_answer input  = num_questions × (avg_chunk_tokens × top_k + query_overhead_tokens)
+#   generate_answer output = num_questions × answer_max_tokens
+#   judge input  = num_questions × num_pipelines × num_metrics ×
+#                  (question_tokens + ground_truth_tokens + context_tokens +
+#                   answer_tokens + judge_prompt_tokens)
+#   judge output = num_questions × num_pipelines × num_metrics × judge_output_tokens
+#   question_gen input  = num_papers × avg_paper_tokens
+#   question_gen output = num_questions × question_output_tokens
+# -----------------------------------------------------------------------------
+cost_estimation:
+  # --- Static estimate defaults (Phase A) ---
+
+  # Average tokens per full document (used for contextualization input estimation).
+  avg_doc_tokens: 8000
+
+  # Average tokens per chunk (matches chunking.chunk_size default).
+  avg_chunk_tokens: 400
+
+  # Expected output tokens per contextualization call (LLM adds ~100-token context prefix).
+  contextualization_output_tokens: 100
+
+  # Extra token overhead per query: system prompt, instructions, formatting.
+  query_overhead_tokens: 200
+
+  # Expected max output tokens per answer generation call.
+  answer_max_tokens: 500
+
+  # Estimated tokens for the judge prompt template (instructions + metric definition).
+  judge_prompt_tokens: 300
+
+  # Expected output tokens per judge scoring call (score + justification).
+  judge_output_tokens: 200
+
+  # Average tokens per full arXiv paper (used for question generation input estimation).
+  avg_paper_tokens: 15000
+
+  # Expected output tokens per generated question+ground_truth pair.
+  question_output_tokens: 300
+
+  # --- Sample-based refinement sizes (Phase B) ---
+
+  # Number of chunks to sample before full contextualization run.
+  # Actual tokens measured on this sample, then extrapolated to full corpus.
+  sample_size_contextualize: 5
+
+  # Number of questions to sample before full evaluation run.
+  # 1 question × 1 pipeline × 4 metrics = 4 judge calls for calibration.
+  sample_size_evaluate: 1
+
+  # Number of papers to sample before full question generation run.
+  sample_size_question_gen: 2
+
+
+# -----------------------------------------------------------------------------
+# cost_pricing -- per-token pricing table for all supported models
+# All rates are in USD per 1,000 tokens.
+# Update these if provider pricing changes.
+# -----------------------------------------------------------------------------
+cost_pricing:
+  claude-haiku-4-5-20241022:
+    # Anthropic claude-haiku-4-5 (fastest, cheapest Anthropic model)
+    input_per_1k: 0.001
+    output_per_1k: 0.005
+
+  claude-sonnet-4-20250514:
+    # Anthropic claude-sonnet-4 (default answer generation model)
+    input_per_1k: 0.003
+    output_per_1k: 0.015
+
+  claude-opus-4-20250514:
+    # Anthropic claude-opus-4 (highest capability, most expensive)
+    input_per_1k: 0.015
+    output_per_1k: 0.075
+
+  gpt-4o:
+    # OpenAI GPT-4o (multimodal, high capability)
+    input_per_1k: 0.005
+    output_per_1k: 0.015
+
+  gpt-4o-mini:
+    # OpenAI GPT-4o-mini (fast, cheap OpenAI option)
+    input_per_1k: 0.00015
+    output_per_1k: 0.0006
+
+
+# -----------------------------------------------------------------------------
+# evaluation -- metrics and judge parameters
+# -----------------------------------------------------------------------------
+evaluation:
+  # The 4 RAGAS-inspired metrics scored by the LLM judge.
+  # Each metric is scored 0.0–1.0 per question-pipeline combination.
+  # Total judge calls: 20 questions × 4 pipelines × 4 metrics = 320
+  metrics:
+    - context_precision    # Are the retrieved chunks relevant to the question?
+    - context_recall       # Do the retrieved chunks cover the ground truth?
+    - faithfulness         # Is the answer grounded in the retrieved chunks?
+    - answer_relevancy     # Does the answer directly address the question?
+
+  # Temperature for LLM judge calls. 0.0 = deterministic scoring.
+  # Keep at 0.0 for reproducible evaluation scores.
+  judge_temperature: 0.0
+
+
+# -----------------------------------------------------------------------------
+# concurrency -- worker pool and timeout settings
+# -----------------------------------------------------------------------------
+concurrency:
+  # Maximum parallel workers for batch operations (contextualization, evaluation).
+  # Increase for faster throughput if API rate limits allow.
+  # Decrease if hitting rate limits or MPS memory pressure.
+  max_workers: 4
+
+  # Seconds to wait without any task completing before aborting with a stall error.
+  # Prevents silent hangs during long batch runs.
+  # Applies to contextualization and evaluation batch loops.
+  stall_timeout_seconds: 120
