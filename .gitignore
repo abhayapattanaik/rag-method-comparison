@@ -34,7 +34,8 @@ share/python-wheels/
 .LSOverride
 
 # Data / raw files
-data/
+data/*
+!data/.gitkeep
 *.pdf
 
 # Personal tooling config
