@@ -4,7 +4,7 @@ A controlled experiment comparing four RAG retrieval methods on answer quality, 
 and latency. Each method builds on the previous one, adding exactly one technique at a time,
 so the contribution of each component can be isolated and measured.
 
-Corpus: 20 arXiv RAG research papers.
+Corpus: 8 arXiv RAG research papers.
 Evaluation: LLM-as-judge scoring on 4 metrics across 32 questions per pipeline.
 
 ---
@@ -142,21 +142,19 @@ claude_rc_2/
     cli/
       main.py                 argparse entry point with subcommands
   data/
-    papers/                   Downloaded arXiv PDFs (20 papers)
+    papers/                   Downloaded arXiv PDFs (8 papers)
     chroma_db/                ChromaDB persistent storage (2 collections)
     cache/                    Contextualization cache (per-chunk JSON files)
     results/                  Evaluation results (per question-pipeline-metric JSON)
     questions.json            Generated questions + ground truth
   docs/
     architecture.md           System design with component responsibilities
-    design-decisions.md       Key decisions made during implementation
     test-plan.md              Verification strategy and acceptance criteria
     evaluation-questions.md   The 32 evaluation questions and ground truth
-    comparison-analysis.md    Findings from running all 4 methods
-    cost-quality-tradeoff.md  Which method gives best quality per token spent
     rag-glossary.md           Key RAG terms (dense retrieval, RRF, cross-encoder, BM25, etc.)
-    chunk-sizing-research.md  Chunk size research and rationale for chosen parameters
   tests/                      Unit and integration tests
+  Our-Learnings.md            What we learned from comparing the 4 methods
+  CUSTOMIZATION.md            Guide for adapting to a different corpus
   requirements.txt
   project-spec.md             Full build specification
   project-plan.md             Implementation phases
@@ -323,11 +321,10 @@ Each result is persisted immediately as `data/results/eval/{qid}_{pipeline}_{met
 
 ## Further Reading
 
+- [Our-Learnings.md](Our-Learnings.md) — what we learned from comparing the 4 methods
 - [GETTING_STARTED.md](GETTING_STARTED.md) — step-by-step first-run walkthrough
 - [DATA_SETUP.md](DATA_SETUP.md) — paper list, download instructions, directory layout
+- [CUSTOMIZATION.md](CUSTOMIZATION.md) — adapting this system to a different corpus
 - [docs/evaluation-questions.md](docs/evaluation-questions.md) — the 32 evaluation questions
 - [docs/architecture.md](docs/architecture.md) — full system design with data flow diagrams
-- [docs/design-decisions.md](docs/design-decisions.md) — rationale for key technology choices
-- [docs/comparison-analysis.md](docs/comparison-analysis.md) — results from running all 4 methods
-- [docs/cost-quality-tradeoff.md](docs/cost-quality-tradeoff.md) — quality per token analysis
 - [docs/rag-glossary.md](docs/rag-glossary.md) — glossary of RAG concepts used in this project
